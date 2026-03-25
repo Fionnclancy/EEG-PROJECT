@@ -1,0 +1,170 @@
+import mne
+import numpy as np
+import matplotlib.pyplot as plt
+from mne.datasets import eegbci
+from sklearn.preprocessing import LabelEncoder
+from mne.decoding import CSP
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.model_selection import cross_val_score, StratifiedKFold, RepeatedStratifiedKFold
+from sklearn.pipeline import Pipeline
+
+subjects = range(1,50)
+
+runs_execution = [3,7,11]
+runs_imagery   = [4,8,12]
+
+motor_chs = [
+    'Fc5.', 'Fc3.', 'Fc1.', 'Fcz.', 'Fc2.', 'Fc4.', 'Fc6.',
+    'C5..', 'C3..', 'C1..', 'Cz..', 'C2..', 'C4..', 'C6..',
+    'Cp5.', 'Cp3.', 'Cp1.', 'Cpz.', 'Cp2.', 'Cp4.', 'Cp6.'
+]
+
+subject_accuracies = []
+subject_stds = []
+
+for sub in subjects:
+    try:
+        files = eegbci.load_data(sub, runs_execution)
+        raws = [mne.io.read_raw_edf(f, preload=True) for f in files]
+        raw = mne.concatenate_raws(raws)
+
+        somatosensory_chs = ['C3..', 'Cz..', 'C4..', 'Cp3.', 'Cpz.', 'Cp4.']
+
+        events, _ = mne.events_from_annotations(raw)
+        event_id = {'T1': 2, 'T2': 3}
+
+        raw.filter(8.,30., fir_design='firwin')
+
+        epochs = mne.Epochs(raw, events, event_id,
+                            tmin=0.5, tmax=3.5,
+                            baseline=None, preload=True)
+
+        epochs.pick_channels(motor_chs)
+
+        X = epochs.get_data()
+        y = epochs.events[:, -1]
+
+        le = LabelEncoder()
+        y = le.fit_transform(y)
+
+        clf = Pipeline([
+            ('csp', CSP(n_components=4, reg=0.1, log=True)),
+            ('lda', LinearDiscriminantAnalysis())
+        ])
+
+        cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=3)
+        scores = cross_val_score(clf, X, y, cv=cv)
+
+        mean_acc = scores.mean()
+        std_acc = scores.std()
+
+        subject_accuracies.append(mean_acc)
+        subject_stds.append(std_acc)
+
+        print(f"Subject {sub}: Accuracy = {mean_acc:.2f} ± {std_acc:.2f}")
+
+    except:
+        print(f"Skipping subject {sub}")
+
+
+plt.figure(figsize=(10,5))
+
+colors = ['#b452cd' if mean - std >= 0.5 else 'skyblue' 
+          for mean, std in zip(subject_accuracies, subject_stds)]
+
+plt.bar(range(1, len(subject_accuracies)+1),
+        subject_accuracies,
+        yerr=subject_stds,
+        capsize=5,
+        color=colors,
+        alpha=0.7)
+
+plt.xticks(range(1, len(subject_accuracies)+1), rotation=90, fontsize=6)
+plt.ylim(0, 1)
+
+plt.axhline(0.5, color='red', linestyle='--', label='Random Guessing')
+
+plt.xlabel('Subject')
+plt.ylabel('Accuracy')
+plt.title('Per-subject EEG Classification Accuracy for LH vs RH (Motor Execution)')
+
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+def get_all_data(runs):
+    X_all = []
+    y_all = []
+
+    for sub in subjects:
+        try:
+            files = eegbci.load_data(sub, runs)
+            raws = [mne.io.read_raw_edf(f, preload=True) for f in files]
+            raw = mne.concatenate_raws(raws)
+
+            raw.filter(8.,20., fir_design='firwin')
+
+            events, _ = mne.events_from_annotations(raw)
+            event_id = {'T1': 2, 'T2': 3}
+
+            epochs = mne.Epochs(raw, events, event_id,
+                                tmin=1., tmax=2.5,
+                                baseline=None, preload=True)
+
+            epochs.pick_channels(motor_chs)
+
+            X = epochs.get_data()
+            y = LabelEncoder().fit_transform(epochs.events[:, -1])
+
+            X_all.append(X)
+            y_all.append(y)
+
+            print(f"Loaded subject {sub}")
+
+        except:
+            print(f"Skipping subject {sub}")
+
+    return np.concatenate(X_all), np.concatenate(y_all)
+
+X_exec, y_exec = get_all_data(runs_execution)
+
+X_imag, y_imag = get_all_data(runs_imagery)
+
+clf = Pipeline([
+    ('csp', CSP(n_components=8, reg=0.1, log=True)),
+    ('lda', LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto'))
+])
+
+cv = StratifiedKFold(n_splits=10, shuffle=True)
+
+scores_exec = cross_val_score(clf, X_exec, y_exec, cv=cv)
+scores_imag = cross_val_score(clf, X_imag, y_imag, cv=cv)
+
+print("Execution:", scores_exec.mean(), "±", scores_exec.std())
+print("Imagery:", scores_imag.mean(), "±", scores_imag.std())
+
+
+means = [scores_exec.mean(), scores_imag.mean()]
+stds  = [scores_exec.std(),  scores_imag.std()]
+
+labels = ['Execution', 'Imagery']
+
+plt.figure(figsize=(7,6))
+
+bars = plt.bar(labels, means, yerr=stds, capsize=8, alpha=0.8)
+
+bars[0].set_color("#A964B8")
+bars[1].set_color("#4D9BDB")
+
+plt.axhline(0.5, color='red', linestyle='--', label='Random selection')
+
+plt.ylabel('Accuracy')
+plt.title('EEG Classification Accuracy over all subjects')
+plt.ylim(0, 1)
+
+for i, (mean, std) in enumerate(zip(means, stds)):
+    plt.text(i, mean + 0.02, f"{mean:.2f} ± {std:.2f}", ha='center')
+
+plt.legend()
+plt.tight_layout()
+plt.show()
