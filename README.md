@@ -20,10 +20,10 @@ A Common Spatial Patterns (CSP) + Linear Discriminant Analysis (LDA) pipeline is
 ## Visualisations
 
 ### Per-Subject Performance
-![Intra-Subject Motor Execution](per_subject_execution.png)![Intra-Subject Motor Imagery](per_subject_imagery/diagram.png)
+![Intra-Subject Motor Execution](images/per_subject_execution.png)![Intra-Subject Motor Imagery](images/per_subject_imagery.png)
 
 ### Execution vs Imagery Comparison
-![Multi-Subject Execution vs Imagery](execution_vs_imagery.png)
+![Multi-Subject Execution vs Imagery](images/execution_vs_imagery.png)
 
 ---
 
